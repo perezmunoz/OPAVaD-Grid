@@ -1,0 +1,80 @@
+body {
+  background-color: teal !important;
+}
+
+div.busy {
+  position: fixed;
+  display: none;
+  top: 45%;
+  left: 46%;
+  background-color: rgba(192, 192, 192, 0.5);
+  text-align: center;
+  border-radius: 5px;
+  padding-top: 15px;
+  padding-left: 30px;
+  padding-bottom: 15px;
+  padding-right: 30px;
+  z-index: 10;
+}
+
+html.shiny-busy {
+  display: block;
+}
+
+.button {
+    width: 100px;
+    height: 100px;
+    background-color: #000;
+    border: solid 1px #000;
+    border-radius: 50%
+}
+
+div.well {
+  position: absolute;
+  top: 40%;
+  left: 43%;
+  width: auto;
+  height: auto;
+  margin : auto auto;
+  text-align: left;
+  box-shadow: 5px 3px 10px black;
+}
+ 
+.gridster .gs_w {
+  box-shadow: 5px 3px 10px black !important;
+}
+
+/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
+/* START Composants carte
+/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
+#map {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+.modal {
+  background-color: white;
+  opacity: 0.9;
+  padding: 20px 20px 20px 20px;
+  cursor: move;
+  zoom: 0.9;
+}
+.modal_ca {
+  opacity: 1.0;
+}
+
+/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
+/* END Composants carte
+/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
+
+/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
+/* START Composants profil
+/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
+/*#graph_profil_csp.rChart {
+  width: 500px !important;
+  height: 500px !important;
+}*/
+/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
+/* END Composants profil
+/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
