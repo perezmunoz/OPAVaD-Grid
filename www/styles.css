@@ -1,5 +1,5 @@
 body {
-  background-color: #48D1CC !important;
+  background-color: #008B8B !important;
 }
 
 div.busy {
@@ -79,6 +79,13 @@ div.well {
   width: 500px !important;
   height: 500px !important;
 }*/
+/* Modifie la taille du div contenant les svg et évite la superposition sur d'autres composants */
+div#graph_profil.shiny-html-output.rChart.nvd3.shiny-bound-output,
+div#graph_profil_genre.shiny-html-output.rChart.nvd3.shiny-bound-output,
+div#graph_profil_age.shiny-html-output.rChart.nvd3.shiny-bound-output {
+  width: 250px !important;
+  height: 250px !important;
+}
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
 /* END Composants profil
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/

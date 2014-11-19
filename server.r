@@ -23,12 +23,14 @@ shinyServer(function(input, output, session) {
   session$sendCustomMessage(type='jsCode', list(value = "var_ca = false"))
   session$sendCustomMessage(type='jsCode', list(value = "var_profil = false"))
   session$sendCustomMessage(type='jsCode', list(value = "var_prospection = false"))
+  # session$sendCustomMessage(type='jsCode', list(value = "var_densite = false"))
   
   # Appel de l'interface de connexion
   source('www/login.r',  local = TRUE)
   
   # Observateur lisant l'intégralité du code lors de l'appui sur le bouton de connexion
   observe({
+    
     # Encapsuleur donnant accès à l'application sous condition que la connexion soit validée
     if (USER$Logged == TRUE) {
       
@@ -296,11 +298,24 @@ shinyServer(function(input, output, session) {
         soir <- rbindlist(list(tr[heure %in% seq(as.ITime("17:00:01", format = "%H:%M:%S"), as.ITime("23:59:59", format = "%H:%M:%S")), ],
                                tr[heure %in% seq(as.ITime("00:00:00", format = "%H:%M:%S"), as.ITime("07:59:59", format = "%H:%M:%S")), ]))
         
-        # La classe IDate contient un attribut qui ordonne automatiquement les données
+        # Création de la séquence de dates
+        seq.dates <<- as.character(seq(from = as.IDate(periode_date_ca[1]), to = as.IDate(periode_date_ca[2]), by = 1))
+        
+        # La classe IDate contient un attribut qui ordonne automatiquement les données (pas exactement ordonnées)
         matin.s <- matin %>%
           group_by(date) %>%
           summarise(montant = sum(montant),
                     transaction = n())
+        
+        # Il y a t-il des éléments manquants pour le main ?
+        diff.matin <- setdiff(seq.dates, as.character(matin.s$date))
+        if(length(diff.matin)>0) {
+          matin.s <- rbind(matin.s,
+                           data.frame(date = as.IDate(diff.matin, format = "%Y-%m-%d"),
+                                      montant = numeric(length = length(diff.matin)),
+                                      transaction = numeric(length = length(diff.matin)))
+          )
+        }
         # Ajout de la dernière colonne pour le tracé
         matin.s[,period:="matin"]
         
@@ -308,26 +323,52 @@ shinyServer(function(input, output, session) {
           group_by(date) %>%
           summarise(montant = sum(montant),
                     transaction = n())
+        diff.midi <- setdiff(seq.dates, as.character(midi.s$date))
+        if(length(diff.midi)>0) {
+          midi.s <- rbind(midi.s,
+                           data.frame(date = as.IDate(diff.midi, format = "%Y-%m-%d"),
+                                      montant = numeric(length = length(diff.midi)),
+                                      transaction = numeric(length = length(diff.midi)))
+          )
+        }
         midi.s[,period:="midi"]
         
         pm.s <- pm %>%
           group_by(date) %>%
           summarise(montant = sum(montant),
                     transaction = n())
+        diff.pm <- setdiff(seq.dates, as.character(pm.s$date))
+        if(length(diff.pm)>0) {
+          pm.s <- rbind(pm.s,
+                          data.frame(date = as.IDate(diff.pm, format = "%Y-%m-%d"),
+                                     montant = numeric(length = length(diff.pm)),
+                                     transaction = numeric(length = length(diff.pm)))
+          )
+        }
         pm.s[,period:="pm"]
         
         soir.s <- soir %>%
           group_by(date) %>%
           summarise(montant = sum(montant),
                     transaction = n())
+        diff.soir <- setdiff(seq.dates, as.character(soir.s$date))
+        if(length(diff.soir)>0) {
+          soir.s <- rbind(soir.s,
+                        data.frame(date = as.IDate(diff.soir, format = "%Y-%m-%d"),
+                                   montant = numeric(length = length(diff.soir)),
+                                   transaction = numeric(length = length(diff.soir)))
+          )
+        }
         soir.s[,period:="soir"]
         
         # Fusion de l'ensemble des tables
         df <- rbindlist(list(matin.s, midi.s, pm.s, soir.s))
         
         # Modification de la structure pour compatibilité avec la construction du graphique
-        df$period <- factor(df$period, c("soir", "pm", "midi", "matin"))
+        df$period <- factor(df$period, levels = c("matin", "midi", "pm", "soir"), ordered = TRUE)
         df$date <- as.factor(df$date)
+        setorder(df, date)
+        out <<- df
         
         # Traitement du use case : 'aucune transaction dans la période de visualisation' (exemple : visualisation sur une journée)
         if(nrow(df)>0) {
@@ -502,8 +543,8 @@ shinyServer(function(input, output, session) {
           value ~ type,
           data = data_profil,
           type = "pieChart",
-          width = 400,
-          height = 400
+          width = 250,
+          height = 250
         )
         nPie$set(dom = "graph_profil")
         nPie$chart(donut = FALSE, showLegend = TRUE)
@@ -537,8 +578,8 @@ shinyServer(function(input, output, session) {
           n ~ sexe,
           data = df_sexe,
           type = "pieChart",
-          width = 400,
-          height = 400
+          width = 250,
+          height = 250
         )
         nPie$set(dom = "graph_profil_genre")
         nPie$chart(donut = TRUE, showLegend = TRUE)
@@ -560,8 +601,8 @@ shinyServer(function(input, output, session) {
           freq ~ pallier,
           data = df_age,
           type = "pieChart",
-          width = 400,
-          height = 400
+          width = 250,
+          height = 250
         )
         nPie$set(dom = "graph_profil_age")
         nPie$chart(donut = TRUE, showLegend = TRUE)
@@ -598,6 +639,38 @@ shinyServer(function(input, output, session) {
         nPie
       })
       
+      output$modal_profils_majoritaires <- renderUI({
+        bsModal(id = "id_mod_profils_majoritaires", "Profil des clients", trigger = "btn_modal_profil_majoritaires",
+                tags$p("La table suivante établit les profils de consommation par ordre décroissant. Leur poids ainsi que le pourcentage cumulé est donné à titre indicatif."),
+                br(),
+                tags$div(class = "row-fluid",
+                         tags$div(class = "span12",
+                                  dataTableOutput("tbl_profils_majoritaires"))
+                )
+        )
+      })
+      
+      # Table des profils de consommation
+      output$tbl_profils_majoritaires <- renderDataTable({
+        get_donnee_profil_majoritaires()
+      }, options = list(orderClasses = TRUE))
+      
+      # Récupération de l'information sur les profils de clients selon les dates de visualisation du profil
+      get_donnee_profil_majoritaires <- reactive({
+        periode_date_profils_maj <- get_date_profil()
+        df.s$date <- as.IDate(df.s$date, format = "%d/%m/%Y")
+        retour_profils <- subset(df.s, date %between% c(periode_date_profils_maj[1],periode_date_profils_maj[2]))
+        retour_profils <- subset(retour_profils, select = c("client","age","sexe","csp","situation"))
+        retour_profils <- unique(retour_profils) %>%
+          ddply(.(age,sexe,csp,situation), summarise, freq=length(age)) %>%
+          arrange(desc(freq))
+        retour_profils$rec <- retour_profils$freq / sum(retour_profils$freq) * 100
+        retour_profils$rec.cum <- cumsum(retour_profils$rec)
+        retour_profils
+      })
+
+      # Fonction intégrant la fenêtre modale lors du click sur le bouton
+      # toggleModal(session, "modal_profils_majoritaires")
       #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
       # END Module 'profil des clients'
       #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -636,7 +709,15 @@ shinyServer(function(input, output, session) {
       get_donnee_prospection <- reactive({
         
         # Récupération de la période de visualisation et trigger de la fonction
-        periode_date_profil <- c(input$date_prospection_champ_action, input$date_visualisation_profil[2])
+        periode_date_prospection <- c(input$date_prospection_champ_action, input$date_visualisation_profil[2])
+        print("La période de visualisation du ")
+        print(periode_date_prospection)
+        
+        print("input$date_prospection_champ_action")
+        print(input$date_prospection_champ_action)
+        
+        print("input$date_visualisation_profil[2]")
+        print(input$date_visualisation_profil[2])
         
         # Si la data frame data_prospection existe déjà on l'efface pour ne pas avoir de concurrence d'accès dans la suite des calculs
         if(exists("data_prospection"))
@@ -648,7 +729,7 @@ shinyServer(function(input, output, session) {
         tr$siret <- as.factor(tr$siret)
         
         # Subset selon la période de visualisation
-        tr <- tr[date %between% c(periode_date_profil[1],periode_date_profil[2])]
+        tr <- tr[date %between% c(periode_date_prospection[1],periode_date_prospection[2])]
         
         # Récupération des 'reliques' transactionnelles
         tr.c <- unique(tr,by=c("client","siret"))[j=list(client,siret)]
@@ -705,34 +786,7 @@ shinyServer(function(input, output, session) {
         return(data_prospection)
       })
       
-      output$prospection_resultats <- renderUI({
-        # Le bouton de prospection est le trigger
-        input$btn_prospection_prospecter
-        if(exists("df.prospection")) {
-          if(!is.null(df.prospection)) {
-          fluidRow(
-            column(width = 8, offset = 2, id = "div_prospection_resultats",
-                   "Il y a", strong(nrow(df.prospection[df.prospection$dist==1,])), "clients potentiels avec un panier moyen de", strong(round(mean(df.prospection[df.prospection$dist==1,]$panier),1)), "€."
-            )
-          )
-          } else {
-            fluidRow(
-              column(width = 8, offset = 2, id = "div_prospection_resultats",
-                     "Il y a", strong("0"), "clients potentiels. Penser à revoir vos critères de filtrage."
-              )
-            )
-          }
-        } else {
-          fluidRow(
-            column(width = 8, offset = 2, id = "div_prospection_resultats",
-                   "Lancer l'algorithme de prospection."
-            )
-          )
-        }
-      })
-      
       observe({ # observateur isolant le bouton de lancement de la prospection (évite de charger les tables à nouveau)
-        
         # Graphique 'Répartition de la clientèle'
         output$graph_profil_prospection <- renderChart({
           # Code JavaScript envoyé au serveur afin de modifier le fichier HTML généré.
@@ -752,23 +806,147 @@ shinyServer(function(input, output, session) {
           nPie
         })
         
-        # Affichage du nombre de clients atteints par la prospection
-        output$prospection_previsions <- renderUI({
-          # si la prospection n'a pas encore été lancé, on prévient le commerçant de la lancer
-          if(!exists("df.prospection")) {
-            tagList(tags$h1("0"), tags$h3("Clients potentiels"),
-                    tags$h3("Penser à visualiser la répartition de la fidélité des clients puis à lancer la prospection !")
+        # Affichage dynamique du nombre de clients potentiels pour la prospection selon les critères en entrée
+        output$prospection_clients_potentiels <- renderUI({
+          # triggers
+          input$btngrp_prospection_genre
+          input$slider_input_prospection_age
+          input$btngrp_prospection_situation
+          input$btngrp_prospection_csp
+          input$btngrp_prospection_clients
+          # La date a aussi son influence sur le nombre de clients potentiels
+          input$date_prospection_champ_action
+          if(nrow(df.p)>0){
+            print('nrow(df.p)>0')
+            fluidRow(
+              column(width = 8, offset = 2, id = "div_prospection_clients_potentiels",
+                     HTML(paste("Nombre de prospects potentiels répondant aux critères : ", strong(clients_potentiels()), ".", sep = ""))
+              )
             )
           } else {
-            # Affichage des résultats de la prospection
-            tagList(tags$h1(nrow(df.prospection[df.prospection$dist==1,])), tags$h3("Clients potentiels"),
-                    tags$h1(ifelse(length(df.prospection$dist)!=0,paste(round(mean(df.prospection$panier),1), "€"),"0 €")), tags$h3("Panier moyen client"),
-                    tags$h1(ifelse(length(df.prospection$dist)!=0,paste(nrow(df.prospection[df.prospection$dist==1,])*floor(mean(df.prospection$panier)), "€"), "0 €")), tags$h3("Bénéfices potentiels*")
+            print('nrow(df.p)==0')
+            fluidRow(
+              column(width = 8, offset = 2, id = "div_prospection_clients_potentiels",
+                     HTML(paste("Nombre de prospects potentiels répondant aux critères : ", strong("0"), ".", sep = ""))
+              )
             )
           }
         })
         
-        # Fonction construisant la chaîne de caractères pour les critères situation familiale et CSP
+        # Fonction calculant le nombre de clients potentiels selon les critères (temps réel)
+        clients_potentiels <- function() {
+          print("clients_potentiels appelée ?")
+          # La distance est un facteur non pris en compte dans le calcul des clients potentiels
+          cl_potentiels <- unique(df.p %>%
+                                    group_by(client) %>%
+                                    summarise(age=age,
+                                              sexe=sexe,
+                                              situation=situation,
+                                              csp=csp))
+          if(!is.null(input$btngrp_prospection_genre)) {
+            cl_potentiels <- subset(cl_potentiels, sexe %in% input$btngrp_prospection_genre)
+          }
+          if(!is.null(input$slider_input_prospection_age)) {
+            cl_potentiels <- subset(cl_potentiels, age %between% input$slider_input_prospection_age)
+          }
+          if(!is.null(input$btngrp_prospection_situation)) {
+            cl_potentiels <- subset(cl_potentiels, situation %in% input$btngrp_prospection_situation)
+          }
+          if(!is.null(input$btngrp_prospection_csp)) {
+            cl_potentiels <- subset(cl_potentiels, csp %in% input$btngrp_prospection_csp)
+          }
+          return(nrow(cl_potentiels))
+        }
+        
+        output$prospection_resultats <- renderUI({
+          # Le bouton de prospection est le trigger
+          input$btn_prospection_prospecter
+          isolate({
+            if(exists("df.prospection")) {
+              switch(input$radiobtn_prospection_type,
+                     prospection_standard = {
+                       if(!is.null(df.prospection)) {
+                         fluidRow(
+                           column(width = 8, offset = 2, id = "div_prospection_resultats",
+                                  "Résulat de la prospection type", strong("standard"), ": il y a", strong(nrow(df.prospection[df.prospection$dist==1,])), "prospects qui répondent à vos critères avec un panier moyen de", strong(round(mean(df.prospection[df.prospection$dist==1,]$panier),1)), "€."
+                           )
+                         )
+                       } else {
+                         fluidRow(
+                           column(width = 8, offset = 2, id = "div_prospection_resultats",
+                                  "Résulat de la prospection type", strong("standard"), ": il y a", strong("0"), "prospects qui répondent à vos critères. Penser à revoir vos critères de filtrage."
+                           )
+                         )
+                       }
+                     }, # fin prospection_standard
+                     prospection_quantitative = {
+                       if(!is.null(df.prospection)) {
+                         fluidRow(
+                           column(width = 8, offset = 2, id = "div_prospection_resultats",
+                                  "Résulat de la prospection de type", strong("quantitatif"), ": il y a", strong(nrow(df.prospection)), "prospects qui répondent à vos critères avec un panier moyen de", strong(round(mean(df.prospection$panier),1)), "€."
+                           )
+                         )
+                       } else {
+                         fluidRow(
+                           column(width = 8, offset = 2, id = "div_prospection_resultats",
+                                  "Résulat de la prospection de type ", strong("quantitatif"), " : il y a", "prospects qui répondent à vos critères. Penser à revoir vos critères de filtrage."
+                           )
+                         )
+                       }
+                     }, # fin prospection_quantitative
+                     prospection_qualitative = {
+                       fluidRow(
+                         column(width = 8, offset = 2, id = "div_prospection_resultats",
+                                HTML(paste("Résultat de la prospection de type ", strong("qualitatif"), " : il y a ", strong(nrow(df.prospection)), " prospects qui répondent à vos critères avec un panier moyen compris entre ", strong(input$slider_input_prospection_qualitatif[1]), " et ", strong(input$slider_input_prospection_qualitatif[2]), ".", sep = ""))
+                         )
+                       )
+                     } # fin prospection_qualitative
+              ) 
+              # lancement de l'application : initialiser la prospection
+            } else {
+              fluidRow(
+                column(width = 8, offset = 2, id = "div_prospection_resultats",
+                       "Lancer l'algorithme de prospection."
+                )
+              )
+            }
+            
+#             if(exists("df.prospection")) {
+#               # type de comparaison : standard ou quantitative
+#               if(input$radiobtn_prospection_type == "prospection_standard" | input$radiobtn_prospection_type == "prospection_quantitative") {
+#                 if(!is.null(df.prospection)) {
+#                   fluidRow(
+#                     column(width = 8, offset = 2, id = "div_prospection_resultats",
+#                            "Résulat de le prospection : il y a", strong(nrow(df.prospection[df.prospection$dist==1,])), "prospects avec un panier moyen de", strong(round(mean(df.prospection[df.prospection$dist==1,]$panier),1)), "€."
+#                     )
+#                   )
+#                 } else {
+#                   fluidRow(
+#                     column(width = 8, offset = 2, id = "div_prospection_resultats",
+#                            "Résulat de le prospection : il y a", strong("0"), "prospects. Penser à revoir vos critères de filtrage."
+#                     )
+#                   )
+#                 }
+#                 # type de comparaison : qualitative
+#               } else {
+#                   fluidRow(
+#                     column(width = 8, offset = 2, id = "div_prospection_resultats",
+#                            HTML(paste("Résultat de la prospection : il y a ", strong(nrow(df.prospection)), " prospects avec un panier moyen compris entre ", strong(input$slider_input_prospection_qualitatif[1]), " et ", strong(input$slider_input_prospection_qualitatif[2]), ".", sep = ""))
+#                     )
+#                   )
+#               }
+#               # lancement de l'application : initialiser la prospection
+#             } else {
+#               fluidRow(
+#                 column(width = 8, offset = 2, id = "div_prospection_resultats",
+#                        "Lancer l'algorithme de prospection."
+#                 )
+#               )
+#             }
+          })
+        })
+        
+        # NOT USED Fonction construisant la chaîne de caractères pour les critères situation familiale et CSP
         chainage_criteres_prospection <- function(e) {
           if(length(e)!=0) {
             e.chaine <- ""
@@ -796,8 +974,9 @@ shinyServer(function(input, output, session) {
           isolate({
             
             if(nrow(df.p)==0) {
+              return()
               # Faire apparaître une fenêtre modale ordonnant l'utilisteur de visualiser le profil des clients
-              toggleModal(session, "modal_prospection_warning")
+              # toggleModal(session, "modal_prospection_warning")
             } else {
               # On subset la table de prospection pour ne garder les choix du commerçant
               df.prospection <- unique(df.p %>%
@@ -817,66 +996,121 @@ shinyServer(function(input, output, session) {
                                                    Glat=Glat,
                                                    Glon=Glon,
                                                    fid=fid))
-              
-              # Les filtres ne s'appliquent qu'aux prospects
-              # Si le commerçant décide de prospecter les clients fidèles et/ou infidèles alors ils ne sont pas comptabilisés
-              # Cas où il veut prospecter que les clients infidèles : alors les clients fidèles sont soumis aux mêmes filtres que les prospects
-              print(input$btngrp_prospection_clients)
-              if(!is.null(input$btngrp_prospection_clients)) {
-                df.prospection.fideles <- cbind(subset(df.prospection, fid %in% input$btngrp_prospection_clients), dist = c(1))
-                df.prospection <- subset(df.prospection, !(fid %in% input$btngrp_prospection_clients))
-              }
-              # On subset la data table contenant les clients à prospecter en fonction des critères du commerçant
-              # D'abord on subset par sexe et âge
-              if(!is.null(input$btngrp_prospection_genre)) {
-                df.prospection <- subset(df.prospection, sexe %in% input$btngrp_prospection_genre)
-              }
-              if(!is.null(input$slider_input_prospection_age)) {
-                df.prospection <- subset(df.prospection, age %between% input$slider_input_prospection_age)
-              }
-              # La condition if empêche le subset dans le cas où le critère n'a pas été précisé
-              # Puis par situation
-              if(!is.null(input$btngrp_prospection_situation)) {
-                df.prospection <- subset(df.prospection, situation %in% input$btngrp_prospection_situation)
-              }
-              
-              # Enfin par csp
-              if(!is.null(input$btngrp_prospection_csp)) {
-                df.prospection <- subset(df.prospection, csp %in% input$btngrp_prospection_csp)
-              }
-              
-              # Pour mémo :
-              # fid = 1 : clients fidèles
-              # fid = 2 : clients infidèles
-              # fid = 0 : prospects
-              # Le vecteur input$checkBoxFideliteProspection contient les valeurs 1 et 2 selon le choix du commerçant
-              
-              # Data table finale
-              # dist = 0 : n'est pas présent dans le champ d'action
-              # dist = 1 : est présent dans le champ d'action
-              
-              # Condition if : le commerçant souhaite t-il prospecter nécessairement les clients fidèles et/ou infidèles ?
-              df.prospection <<- if(!is.null(input$btngrp_prospection_clients)) {
-                # Si oui, la prospection porte t-elle EXCLUSIVEMENT sur ces clients ?
-                if(nrow(df.prospection)!=0) {
-                  # Si df.prospection est non nul, alors les critères sont tels que la prospection est porte aussi sur des cliens de fid = 0
-                  rbind.data.frame(
-                    # Résidu de prospection hors choix du commerçant sur les clients fidèles et infidèles
-                    distance_cc(df.prospection),
-                    # Table contenant le choix du commerçant sur les clients fidèles et infidèles
-                    df.prospection.fideles
-                  )
+              # le commerçant souhaie réaliser une prospection standard ou quantitative
+              if(input$radiobtn_prospection_type == "prospection_standard" | input$radiobtn_prospection_type == "prospection_quantitative") {
+                # Les filtres ne s'appliquent qu'aux prospects
+                # Si le commerçant décide de prospecter les clients fidèles et/ou infidèles alors ils ne sont pas comptabilisés
+                # Cas où il veut prospecter que les clients infidèles : alors les clients fidèles sont soumis aux mêmes filtres que les prospects
+                if(!is.null(input$btngrp_prospection_clients)) {
+                  df.prospection.fideles <- cbind(subset(df.prospection, fid %in% input$btngrp_prospection_clients), dist = c(1))
+                  df.prospection <- subset(df.prospection, !(fid %in% input$btngrp_prospection_clients))
+                }
+                # On subset la data table contenant les clients à prospecter en fonction des critères du commerçant
+                # D'abord on subset par sexe et âge
+                if(!is.null(input$btngrp_prospection_genre)) {
+                  df.prospection <- subset(df.prospection, sexe %in% input$btngrp_prospection_genre)
+                }
+                if(!is.null(input$slider_input_prospection_age)) {
+                  df.prospection <- subset(df.prospection, age %between% input$slider_input_prospection_age)
+                }
+                # La condition if empêche le subset dans le cas où le critère n'a pas été précisé
+                # Puis par situation
+                if(!is.null(input$btngrp_prospection_situation)) {
+                  df.prospection <- subset(df.prospection, situation %in% input$btngrp_prospection_situation)
+                }
+                # Enfin par csp
+                if(!is.null(input$btngrp_prospection_csp)) {
+                  df.prospection <- subset(df.prospection, csp %in% input$btngrp_prospection_csp)
+                }
+                
+                # Pour mémo :
+                # fid = 1 : clients fidèles
+                # fid = 2 : clients infidèles
+                # fid = 0 : prospects
+                # Le vecteur input$checkBoxFideliteProspection contient les valeurs 1 et 2 selon le choix du commerçant
+                
+                # Data table finale
+                # dist = 0 : n'est pas présent dans le champ d'action
+                # dist = 1 : est présent dans le champ d'action
+                
+                # Condition if : le commerçant souhaite t-il prospecter nécessairement les clients fidèles et/ou infidèles ?
+                df.prospection <<- if(!is.null(input$btngrp_prospection_clients)) {
+                  # Si oui, la prospection porte t-elle EXCLUSIVEMENT sur ces clients ?
+                  if(nrow(df.prospection)!=0) {
+                    # si la prospection est de type standard
+                    if(input$radiobtn_prospection_type != "prospection_quantitative") {
+                    # Si df.prospection est non nul, alors les critères sont tels que la prospection est porte aussi sur des cliens de fid = 0
+                      df <- rbind.data.frame(
+                        # Résidu de prospection hors choix du commerçant sur les clients fidèles et infidèles
+                        distance_cc(df.prospection),
+                        # Table contenant le choix du commerçant sur les clients fidèles et infidèles
+                        df.prospection.fideles
+                      )
+                      df[df$dist==1,]
+                    # s'il s'agit d'une prospection de type quantitative
+                    } else {
+                      print("quantitative")
+                      df <- rbind.data.frame(
+                        # Résidu de prospection hors choix du commerçant sur les clients fidèles et infidèles
+                        distance_cc(df.prospection),
+                        # Table contenant le choix du commerçant sur les clients fidèles et infidèles
+                        df.prospection.fideles
+                      )
+                      # on ordonne par panier décroissant afin de prospection les clients avec un fort panier en priorité
+                      df <- df[order(df$panier, decreasing = TRUE), ]
+                      head(df, input$numeric_input_prospection_quantitatif)
+                    }
+                  } else {
+                    # distinction entre prospection de type standard et quantitative
+                    if(input$radiobtn_prospection_type != "prospection_quantitative") {
+                      # Les critères sont tels qu'il n'y a pas de prospects
+                      # On retourne seulement la table des fidèles/infidèles car nous savons qu'elle existe
+                      df.prospection.fideles
+                      # s'il s'agit d'une prospection de type quantitative...
+                    } else {
+                      # Les critères sont tels qu'il n'y a pas de prospects
+                      # On retourne seulement la table des fidèles/infidèles car nous savons qu'elle existe
+                      # on ordonne par panier décroissant afin de prospection les clients avec un fort panier en priorité
+                      head(df.prospection.fideles[order(df.prospection.fideles$panier, decreasing = TRUE), ], input$numeric_input_prospection_quantitatif)
+                    }
+                  }
+                  # aucune préférence pour la prospection des clients fidèles et/ou infidèles
                 } else {
-                  # Les critères sont tels qu'il n'y a pas de prospects
-                  # On retourne seulement la table des fidèles/infidèles car nous savons qu'elle existe
-                  df.prospection.fideles
+                  # Si le commerçant souhaite prospecter tout le monde indifférement, clients fidèles/infidèles et prospects
+                  if(nrow(df.prospection)!=0) {
+                    # si la prospection est de type standard
+                    if(input$radiobtn_prospection_type != "prospection_quantitative") {
+                      # Si les critères font qu'il y a des prospects, alors on l'envoi dans distance_cc
+                      df <- distance_cc(df.prospection)
+                      # on stock dans df.prospection que les clients qui sont réellement prospects
+                      df[df$dist==1,]
+                      # s'il s'agit d'une prospection de type quantitative...
+                    } else {
+                      # Si les critères font qu'il y a des prospects, alors on l'envoi dans distance_cc
+                      df <- distance_cc(df.prospection)
+                      # on ordonne par panier décroissant afin de prospection les clients avec un fort panier en priorité
+                      head(df[order(df$panier, decreasing = TRUE), ], input$numeric_input_prospection_quantitatif)
+                    }
+                  }
                 }
+                
+                # distinction entre prospection de type standard et quantitative
+#                 if(input$radiobtn_prospection_type == "prospection_quantitative") {
+#                   print('condition sur la radiobouton ?')
+#                   df.prospection <<- df.prospection[order(df.prospection$panier, decreasing = TRUE), ]
+#                   print(head(df.prospection))
+#                   df.prospection <<- head(df.prospection, input$numeric_input_prospection_quantitatif)
+# #                   return(df.prospection)
+#                 } else {
+#                   return(df.prospection)
+#                 }
+                
+                # type de prospection : qualitative
               } else {
-                # Si le commerçant souhaite prospecter tout le monde indifférement, clients fidèles/infidèles et prospects
-                if(nrow(df.prospection)!=0) {
-                  # Si les critères font qu'il y a des prospects, alors on l'envoi dans distance_cc
-                  distance_cc(df.prospection)
-                }
+                print('prospection_qualitative')
+                # Pour ce type de prospection, uniquement le panier est regardé. Les critères sont laissés de côté
+                df.prospection <<- subset(df.prospection, panier %between% input$slider_input_prospection_qualitatif)
+                return(df.prospection)
               }
             }
             # Fin de l'isolement : supprime la dépendance de input$numericInputChampAction
@@ -898,8 +1132,116 @@ shinyServer(function(input, output, session) {
         }
         
         algo_prospection() # Listener sur l'algorithme de prospection ci-desssus
-        
       }) # Fin observateur 'propsection'
+      
+      observe({ # START Observateur sur la MAJ de la fenêtre modal
+        output$modal_prospection_clients <- renderUI({
+          input$btn_prospection_prospecter
+          if(exists("df.prospection")) {
+            print("df.prospection existe ?")
+            # print(df.prospection)
+            if(!is.null(df.prospection)) {
+                bsModal(id = "id_mod_prospection_clients", "Liste des prospects", trigger = "btn_modal_prospection_clients",
+                        HTML(paste("La liste ci-dessous donne un échantillon des prospects répondant aux critères. Pour télécharger toute la table cliquer sur le bouton", strong("Télécharger."))),
+                        downloadButton('telecharger_data_prospects', 'Télécharger'),
+                        tags$div(class = "row-fluid",
+                                 tags$div(class = "span12",
+                                          dataTableOutput("tbl_profils_prospection_clients"))
+                        )
+                )
+            } else {
+              bsModal(id = "id_mod_prospection_clients", "Liste des prospects", trigger = "btn_modal_prospection_clients",
+                      HTML("Aucun prospect ne répond à vos critères de prospection. Veuillez revoir vos critères de prospection.")
+              )
+            }
+          } else {
+            bsModal(id = "id_mod_prospection_clients", "Liste des prospects", trigger = "btn_modal_prospection_clients",
+                    HTML(paste("Penser à chosir vos critères de prospection et à lancer la prospection en appuyant sur le bouton ", strong("Prospecter"), ".", sep = ""))
+            )
+          }
+        })
+        
+        output$tbl_profils_prospection_clients <- renderDataTable({
+          input$btn_prospection_prospecter
+          # print(df.prospection)
+          if(!is.null(df.prospection)) {
+            sample_clients <- head(subset(df.prospection, select = c("client", "age", "sexe", "csp", "situation")),3)
+            return(sample_clients)
+          } else {
+            return()
+          }
+        }, options = list(
+          "dom" = 'Tt',
+          "searching" = FALSE,
+          "oTableTools" = list(
+            "sSwfPath" = "//cdnjs.cloudflare.com/ajax/libs/datatables-tabletools/2.1.5/swf/copy_csv_xls.swf",
+            "aButtons" = list()
+          )
+        ))
+      }) # END Observateur sur la MAJ de la fenêtre modal
+      
+      output$telecharger_data_prospects <- downloadHandler(
+        filename =  "OPAVaD_prospects.txt",
+        content = function(file) {
+          write.table(df.prospection, file, sep = "\t", quote = FALSE, dec = ".", row.names = FALSE, col.names = TRUE)
+        }
+      )
+
+#       "sDom" = 'T<"clear">lfrtip',
+      
+#       options = list(orderClasses = TRUE))
+      
+      #         if(input$btn_prospection_clients>0) {
+      #           input$btn_prospection_clients
+      #           print("input$btn_prospection_cliens>0")
+      #           if(exists("df.prospection")) {
+      #             print("exists('df.prospection')")
+      #             output$tbl_profils_prospection_clients <- renderDataTable({
+      #             session$sendCustomMessage(type='jsCode', list(value = "var_prospects_clients = true"))
+      #             return(df.prospection)}, options = list(orderClasses = TRUE))
+      #           } else {
+      #             print("non exists('df.prospection')")
+      #             output$tbl_profils_prospection_clients <- renderDataTable({
+      #             session$sendCustomMessage(type='jsCode', list(value = "var_prospects_clients = false"))
+      #             return()}, options = list(orderClasses = TRUE))
+      #           }
+      #         }
+      
+#       library(shiny)
+#       library(ggplot2)
+#       runApp(
+#         list(ui = basicPage(
+#           h1('Diamonds DataTable with TableTools'),
+#           tagList(
+#             singleton(tags$head(tags$script(src='//cdnjs.cloudflare.com/ajax/libs/datatables/1.9.4/jquery.dataTables.min.js',type='text/javascript'))),
+#             singleton(tags$head(tags$script(src='//cdnjs.cloudflare.com/ajax/libs/datatables-tabletools/2.1.5/js/TableTools.min.js',type='text/javascript'))),
+#             singleton(tags$head(tags$script(src='//cdnjs.cloudflare.com/ajax/libs/datatables-tabletools/2.1.5/js/ZeroClipboard.min.js',type='text/javascript'))),
+#             singleton(tags$head(tags$link(href='//cdnjs.cloudflare.com/ajax/libs/datatables-tabletools/2.1.5/css/TableTools.min.css',rel='stylesheet',type='text/css'))),
+#             singleton(tags$script(HTML("if (window.innerHeight < 400) alert('Screen too small');")))
+#           ),
+#           dataTableOutput("mytable")
+#         )
+#         ,server = function(input, output) {
+#           output$mytable = renderDataTable({
+#             diamonds[,1:6]
+#           }, options = list(
+#             "sDom" = 'T<"clear">lfrtip',
+#             "oTableTools" = list(
+#               "sSwfPath" = "//cdnjs.cloudflare.com/ajax/libs/datatables-tabletools/2.1.5/swf/copy_csv_xls.swf",
+#               "aButtons" = list(
+#                 "copy",
+#                 "print",
+#                 list("sExtends" = "collection",
+#                      "sButtonText" = "Save",
+#                      "aButtons" = c("csv","xls")
+#                 )
+#               )
+#             )
+#           )
+#           )
+#         })
+#       )
+      
       #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
       # END 'module prospection'
       #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -926,9 +1268,81 @@ shinyServer(function(input, output, session) {
           }
         }
       }) # END observateur pour revenir au dashbord
+      
+      #updateButtonGroup(session, "btngrp_prospection_clients", toggle = "checkbox", style = "default", size = "default", disabled = FALSE, value = "1")
+      #updateButtonGroup(session, "btngrp_prospection_genre", toggle = "checkbox", style = "default", size = "default", disabled = FALSE, value = "M")
+      #updateButtonGroup(session, "btngrp_prospection_situation", toggle = "checkbox", style = "default", size = "default", disabled = FALSE, value = "")
+      #updateButtonGroup(session, "btngrp_prospection_csp", toggle = "checkbox", style = "default", size = "default", disabled = FALSE, value = "")
       #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
       # END Gestion 'Afficher module prospection' - 'Retour au dashbord'
       #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      
+      #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      # START 'module densité'
+      #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#       output$panneau_retour_densite <- renderUI({
+#         absolutePanel(id = "composants_densite", class = "modal", fixed = FALSE, draggable = TRUE,
+#                       top = 57, left = 330, right = "auto", bottom = "auto",
+#                       width = "auto", height = "auto",
+#                       bsActionButton(inputId = "btn_densite_retour", label = "Retour", style = "success")
+#         )
+#       })
+#       
+#       output$map_densite <- renderChart2({
+#         # Adaptation aux données OPAVaD
+#         L3 <- Leaflet$new()
+#         L3$setView(c(48.104689, -1.669918), 8)
+#         L3$tileLayer(provider = "MapQuestOpen.OSM")
+#         L3$fullScreen(TRUE)
+#         L3
+#         
+#         prospects_dat = ddply(df.prospection, .(Glat, Glon), summarise, count = length(Glat))
+#         prospects_dat_json = toJSONArray2(na.omit(prospects_dat), json = F, names = F)
+#         cat(rjson::toJSON(prospects_dat_json[1:2]))
+#         
+#         L3$addAssets(jshead = c(
+#           "http://leaflet.github.io/Leaflet.heat/dist/leaflet-heat.js"
+#         ))
+#         
+#         L3$setTemplate(afterScript = sprintf("
+#                                            <script>
+#                                            var addressPoints = %s
+#                                            var heat = L.heatLayer(addressPoints).addTo(map)           
+#                                            </script>
+#                                            ", rjson::toJSON(prospects_dat_json)
+#         ))
+#         L3
+#       })
+      
+      #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      # START Gestion 'Afficher module densité' - 'Retour au dashbord'
+      #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#       observe({ # Observateur pour afficher le module de densité
+#         if(input$btn_densite>0) {
+#           input$btn_densite
+#           session$sendCustomMessage(type='jsCode', list(value = "$(document.getElementById('gridster_dashbord')).css('display','none');"))
+#           session$sendCustomMessage(type='jsCode', list(value = "$(document.getElementById('gridster_profil')).css('display','none');"))
+#           session$sendCustomMessage(type='jsCode', list(value = "var_densite = true"))
+#         }
+#       }) # END observateur pour afficher le module de densité
+#       
+#       observe({ # Observateur pour revenir au dashbord
+#         if(!is.null(input$btn_densite_retour)) {
+#           if(input$btn_densite_retour>0) {
+#             input$btn_densite_retour
+#             session$sendCustomMessage(type='jsCode', list(value = "var_densite = false"))
+#             session$sendCustomMessage(type='jsCode', list(value = "$(document.getElementById('gridster_profil')).css('display','none');"))
+#             session$sendCustomMessage(type='jsCode', list(value = "$(document.getElementById('gridster_dashbord')).css('display','node');"))
+#           }
+#         }
+#       }) # END observateur pour revenir au dashbord
+      #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      # END Gestion 'Afficher module densité' - 'Retour au dashbord'
+      #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      # END 'module densité'
+      #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      
     } # END if(USER$Logged==TRUE)
   }) # END observe global
 })
